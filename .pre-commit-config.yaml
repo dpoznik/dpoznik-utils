@@ -1,0 +1,26 @@
+default_stages: [pre-commit, pre-merge-commit]
+fail_fast: true
+repos:
+  - repo: git@github.com:astral-sh/ruff-pre-commit.git
+    rev: v0.14.3
+    hooks:
+      - id: ruff-check
+        args: [--fix, --unsafe-fixes]
+      - id: ruff-format
+  - repo: git@github.com:pre-commit/pre-commit-hooks.git
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: pretty-format-json
+        args: [--autofix, --indent, "4"]
+        exclude: .*.ipynb
+      - id: trailing-whitespace
+  - repo: git@github.com:codespell-project/codespell.git
+    rev: v2.4.1
+    hooks:
+      - id: codespell
+  - repo: git@github.com:pre-commit/mirrors-mypy.git
+    rev: v1.18.2
+    hooks:
+      - id: mypy
