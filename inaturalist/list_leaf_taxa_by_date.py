@@ -24,8 +24,8 @@ from rich.table import Table
 # Filepaths
 CACHE_DIR = "./cache"
 OUTPUT_DIR = "./output"
-OBS_CACHE_FP = os.path.join(CACHE_DIR, "observations.json")
-OUTPUT_FP = os.path.join(OUTPUT_DIR, "leaf_taxa.csv")
+OBS_CACHE_FP_TP = os.path.join(CACHE_DIR, "observations.{username}.json")
+OUTPUT_FP_TP = os.path.join(OUTPUT_DIR, "leaf_taxa.{username}.csv")
 
 # Fetch parameters
 OBS_API_URL = "https://api.inaturalist.org/v1/observations"
@@ -155,7 +155,11 @@ def list_leaf_taxa_by_date(username: str, num_to_print: int) -> None:
     for column_name, style in column_name_style_tuples:
         table.add_column(column_name, style=style)
 
-    with open(OUTPUT_FP, "w", newline="", encoding="utf-8") as file:
+    if num_leaf_taxa == 0:
+        return
+
+    output_fp = OUTPUT_FP_TP.format(username=username)
+    with open(output_fp, "w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
         writer.writerow(column_names)
         for i, (taxon_id, info) in enumerate(sorted_leaf_taxon_id_info_tuples, start=1):
@@ -171,7 +175,7 @@ def list_leaf_taxa_by_date(username: str, num_to_print: int) -> None:
                 table.add_row(*row_values)
 
     console.print(table)
-    logger.info(f"\n✅ Saved {num_leaf_taxa} leaf taxa: {OUTPUT_FP}\n")
+    logger.info(f"\n✅ Saved {num_leaf_taxa} leaf taxa: {output_fp}\n")
 
 
 def configure_rich_logging(log_fp: str | None = None) -> None:
@@ -203,9 +207,10 @@ def fetch_observations(username: str) -> list:
     observations = []
     last_date = None
 
-    if os.path.exists(OBS_CACHE_FP):
-        logger.info(f"\nLoading cached observations: {OBS_CACHE_FP}...")
-        with open(OBS_CACHE_FP, encoding="utf-8") as file:
+    obs_cache_fp = OBS_CACHE_FP_TP.format(username=username)
+    if os.path.exists(obs_cache_fp):
+        logger.info(f"\nLoading cached observations: {obs_cache_fp}...")
+        with open(obs_cache_fp, encoding="utf-8") as file:
             observations = json.load(file)
 
         logger.info(f"Loaded {len(observations)} cached observations")
@@ -216,9 +221,9 @@ def fetch_observations(username: str) -> list:
         ]
         if dates:
             last_date = max(dates)
-            logger.info(f"Last cached observation date: {last_date}\n")
+            logger.info(f"Last cached observation date: {last_date}")
 
-    logger.info(f'Fetching observations for "{username}"...')
+    logger.info(f'\nFetching observations for "{username}"...')
     params: dict[str, str | int | bool] = {
         "user_id": username,
         "per_page": PER_PAGE,
@@ -240,17 +245,23 @@ def fetch_observations(username: str) -> list:
     page = 1
     new_observations = []
     num_new_observations = 0
+    valid_request = True
 
     while True:
         params["page"] = page
         response = requests.get(OBS_API_URL, params=params)
         if response.status_code == 429:
-            logger.info("⚠️  Rate limited — pausing 60s...")
+            logger.info("⚠️ Rate limited — pausing 60s...")
             time.sleep(BACKOFF)
             continue
 
+        if response.status_code == 422:
+            logger.error("❌ Invalid request. Try specifying username with `-u`.\n")
+            valid_request = False
+            break
+
         if response.status_code != 200:
-            logger.info(f"⚠️  HTTP {response.status_code}, retrying in 5s...")
+            logger.info(f"⚠️ HTTP {response.status_code}, retrying in 5s...")
             time.sleep(5)
             continue
 
@@ -275,16 +286,17 @@ def fetch_observations(username: str) -> list:
             if observation["id"] not in existing_ids
         ]
         logger.info(f"✅ Added {len(new_observations)} new observations")
-        with open(OBS_CACHE_FP, "w", encoding="utf-8") as file:
+        with open(obs_cache_fp, "w", encoding="utf-8") as file:
             json.dump(merged_observations, file, ensure_ascii=False, indent=2)
 
         logger.info(
-            f"✅ Saved {len(merged_observations)} observations: {OBS_CACHE_FP}\n"
+            f"✅ Saved {len(merged_observations)} observations: {obs_cache_fp}\n"
         )
 
         return merged_observations
     else:
-        logger.info("-- No new observations found --\n")
+        if valid_request:
+            logger.info("-- No new observations found --\n")
 
         return observations
 
