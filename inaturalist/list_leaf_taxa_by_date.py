@@ -57,16 +57,38 @@ console = Console()
 
 @click.command(context_settings={"show_default": True})
 @click.help_option("-h", "--help")
-@click.option("-u", "--username", default=USERNAME_DEFAULT)
-@click.option("-n", "--num-to-print", default=NUM_TO_PRINT_DEFAULT)
-def list_leaf_taxa_by_date(username: str, num_to_print: int) -> None:
+@click.option(
+    "-u",
+    "--username",
+    default=USERNAME_DEFAULT,
+    help="iNaturalist username.",
+)
+@click.option(
+    "-n",
+    "--num-to-print",
+    default=NUM_TO_PRINT_DEFAULT,
+    help="Number of most recently observed species to print to console table.",
+)
+@click.option(
+    "-r",
+    "--refresh-cache",
+    is_flag=True,
+    help="Refresh cache. This is currently the only way to catch new identifications "
+    "added to older observations.",
+)
+def list_leaf_taxa_by_date(
+    username: str,
+    num_to_print: int,
+    *,
+    refresh_cache: bool,
+) -> None:
     """List iNaturalist leaf taxa by first observation date."""
 
     configure_rich_logging()
     os.makedirs(CACHE_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    observations = fetch_observations(username)
+    observations = fetch_observations(username, refresh_cache=refresh_cache)
     taxon_id_to_info = {}
     taxon_id_to_date_first_observed: dict[str, str] = {}
 
@@ -201,14 +223,31 @@ def configure_rich_logging(log_fp: str | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s", handlers=handlers)
 
 
-def fetch_observations(username: str) -> list:
-    """Fetch observations."""
+def fetch_observations(
+    username: str,
+    *,
+    refresh_cache: bool = False,
+) -> list:
+    """Fetch observations.
 
+    Parameters
+    ----------
+    username : str
+        iNaturalist username.
+    refresh_cache : bool, optional
+        Refresh cache if True.
+
+    Returns
+    -------
+    observations : list
+        List of observations.
+
+    """
     observations = []
     last_date = None
 
     obs_cache_fp = OBS_CACHE_FP_TP.format(username=username)
-    if os.path.exists(obs_cache_fp):
+    if not refresh_cache and os.path.exists(obs_cache_fp):
         logger.info(f"\nLoading cached observations: {obs_cache_fp}...")
         with open(obs_cache_fp, encoding="utf-8") as file:
             observations = json.load(file)
@@ -280,25 +319,25 @@ def fetch_observations(username: str) -> list:
 
     if new_observations:
         existing_ids = {observation["id"] for observation in observations}
-        merged_observations = observations + [
-            observation
-            for observation in new_observations
-            if observation["id"] not in existing_ids
-        ]
-        logger.info(f"✅ Added {len(new_observations)} new observations")
-        with open(obs_cache_fp, "w", encoding="utf-8") as file:
-            json.dump(merged_observations, file, ensure_ascii=False, indent=2)
-
-        logger.info(
-            f"✅ Saved {len(merged_observations)} observations: {obs_cache_fp}\n"
+        observations.extend(
+            [
+                observation
+                for observation in new_observations
+                if observation["id"] not in existing_ids
+            ]
         )
+        num_added = len(observations) - len(existing_ids)
+        logger.info(f"✅ Added {num_added} new observations")
 
-        return merged_observations
+        with open(obs_cache_fp, "w", encoding="utf-8") as file:
+            json.dump(observations, file, ensure_ascii=False, indent=2)
+
+        logger.info(f"✅ Saved {len(observations)} observations: {obs_cache_fp}\n")
     else:
         if valid_request:
             logger.info("-- No new observations found --\n")
 
-        return observations
+    return observations
 
 
 def title_case(text: str) -> str:
